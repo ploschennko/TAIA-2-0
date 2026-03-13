@@ -3,53 +3,103 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>TAIA 2.0: Clinical Terminal</title>
+    <title>TAIA 2.0: Multi-Agent Lab</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');
-        body { font-family: 'Segoe UI', sans-serif; background-color: #f1f5f9; color: #0f172a; margin: 0; padding: 0; }
+        body { font-family: 'Segoe UI', sans-serif; background-color: #020617; color: #f8fafc; margin: 0; }
         .mono { font-family: 'JetBrains Mono', monospace; }
-        .chart-container { position: relative; width: 100%; height: 260px; margin: auto; }
-        #chat-window { height: 450px; overflow-y: auto; scroll-behavior: smooth; }
-        .doctor-msg { border-left: 4px solid #ef4444; background: white; }
-        .user-msg { border-right: 4px solid #334155; background: #1e293b; color: white; }
-        .iron-protocol-active { background-color: #7f1d1d !important; color: white !important; }
+        #chat-window { height: 600px; scrollbar-width: thin; scrollbar-color: #1e293b transparent; }
+        #chat-window::-webkit-scrollbar { width: 4px; }
+        #chat-window::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 10px; }
+        
+        .agent-card { border-left: 4px solid #334155; transition: all 0.3s ease; }
+        .agent-active { border-left-width: 8px; transform: translateX(5px); }
+        
+        /* Agent Styles */
+        .taia-style { border-color: #ef4444; background: rgba(239, 68, 68, 0.05); }
+        .neuro-style { border-color: #3b82f6; background: rgba(59, 130, 246, 0.05); }
+        .philo-style { border-color: #a855f7; background: rgba(168, 85, 247, 0.05); }
+        .skeptic-style { border-color: #f97316; background: rgba(249, 115, 22, 0.05); }
+        .exp-style { border-color: #10b981; background: rgba(16, 185, 129, 0.05); }
+        .pattern-style { border-color: #06b6d4; background: rgba(6, 182, 212, 0.05); }
+        .archive-style { border-color: #64748b; background: rgba(100, 116, 139, 0.05); }
+
+        .btn-mode { border-bottom: 2px solid transparent; transition: all 0.2s; }
+        .btn-active { border-color: #ef4444; color: #ef4444; font-weight: 900; }
     </style>
 </head>
-<body class="p-2 md:p-8">
+<body class="p-2 md:p-6">
 
-<div class="max-w-4xl mx-auto">
-    <header class="mb-4 border-b-2 border-slate-900 pb-2">
-        <h1 class="text-4xl font-black uppercase italic text-slate-900">TAIA <span class="text-red-600">2.0</span></h1>
-        <div class="bg-slate-900 text-white px-2 py-1 text-[10px] mono rounded inline-block mt-1">Пам'ять: Активна (Local)</div>
+<!-- Application Structure: Lab Ensemble based on user screenshots -->
+<!-- Chosen Palette: Deep Night (Slate-950), Blood Red Accents (TAIA) -->
+
+<div class="max-w-7xl mx-auto">
+    <header class="flex flex-col md:flex-row justify-between items-center mb-8 border-b border-slate-800 pb-4 gap-4">
+        <div class="flex items-center gap-3">
+            <div class="bg-red-600 text-white font-black p-2 italic leading-none text-2xl">T2</div>
+            <div>
+                <h1 class="text-2xl font-black uppercase tracking-tighter">TAIA <span class="text-red-600">Core</span></h1>
+                <p class="text-[9px] mono text-slate-500 uppercase tracking-widest">Multi-Agent Neuro Lab & Therapy</p>
+            </div>
+        </div>
+        <nav class="flex gap-8 text-xs font-black uppercase tracking-widest">
+            <button id="nav-therapy" onclick="setMode('therapy')" class="btn-mode btn-active">Терапія</button>
+            <button id="nav-lab" onclick="setMode('lab')" class="btn-mode">Лабораторія</button>
+        </nav>
     </header>
 
-    <div class="grid grid-cols-1 gap-4">
-        <!-- Твій Стан -->
-        <div class="bg-white border-2 border-slate-900 p-4 rounded shadow-[4px_4px_0px_0px_rgba(15,23,42,1)]">
-            <div class="chart-container">
-                <canvas id="metricsChart"></canvas>
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-8">
+        
+        <!-- Sidebar -->
+        <div class="lg:col-span-3 space-y-6">
+            <div id="side-therapy" class="bg-slate-900/50 border border-slate-800 p-6 rounded-xl">
+                <h3 class="text-xs font-black uppercase text-red-500 mb-6">Діагностика пацієнта</h3>
+                <div class="h-48">
+                    <canvas id="metricsChart"></canvas>
+                </div>
+                <div class="mt-4 space-y-2 text-[10px] mono">
+                    <div class="flex justify-between border-b border-slate-800 pb-1"><span>Лінь</span> <span id="v-l">50%</span></div>
+                    <div class="flex justify-between border-b border-slate-800 pb-1"><span>Самообман</span> <span id="v-d" class="text-red-500">50%</span></div>
+                </div>
             </div>
-            <div class="flex justify-around mt-2 text-[10px] mono font-bold uppercase">
-                <div>Лінь: <span id="l-laziness">50%</span></div>
-                <div>Пиздьож: <span id="l-delusion" class="text-red-600">50%</span></div>
+
+            <div id="side-lab" class="hidden bg-slate-900/50 border border-slate-800 p-6 rounded-xl space-y-4">
+                <h3 class="text-xs font-black uppercase text-blue-500 mb-4">Склад банди</h3>
+                <div class="space-y-3 text-[11px] font-medium">
+                    <div class="flex items-center gap-2 text-red-400"><span>🧠</span> <b>TAIA</b> (Директор)</div>
+                    <div class="flex items-center gap-2 text-blue-400"><span>🔬</span> <b>NeuroScientist</b></div>
+                    <div class="flex items-center gap-2 text-purple-400"><span>🧩</span> <b>Chaos Philosopher</b></div>
+                    <div class="flex items-center gap-2 text-orange-400"><span>😈</span> <b>Ruthless Skeptic</b></div>
+                    <div class="flex items-center gap-2 text-emerald-400"><span>🧪</span> <b>Experimentalist</b></div>
+                    <div class="flex items-center gap-2 text-cyan-400"><span>📊</span> <b>Pattern Hunter</b></div>
+                    <div class="flex items-center gap-2 text-slate-400"><span>📚</span> <b>Archivist</b></div>
+                </div>
             </div>
         </div>
 
-        <!-- Чат -->
-        <div class="flex flex-col bg-white border-2 border-slate-900 rounded shadow-[4px_4px_0px_0px_rgba(15,23,42,1)] overflow-hidden">
-            <div id="chat-window" class="p-4 space-y-4 bg-slate-50"></div>
-            
-            <div class="p-3 bg-slate-100 border-t border-slate-200">
-                <div class="flex flex-wrap gap-2 mb-3">
-                    <button onclick="qa('лінь')" class="text-[9px] font-bold uppercase bg-white border border-slate-400 px-2 py-1">Проїб</button>
-                    <button onclick="qa('стосунки')" class="text-[9px] font-bold uppercase bg-white border border-slate-400 px-2 py-1">Стосунки</button>
-                    <button onclick="qa('втомився')" class="text-[9px] font-bold uppercase bg-white border border-slate-400 px-2 py-1">Ниття</button>
+        <!-- Main Workspace -->
+        <div class="lg:col-span-9 flex flex-col bg-slate-900/30 border border-slate-800 rounded-2xl overflow-hidden backdrop-blur-sm">
+            <div id="chat-window" class="flex-1 p-6 overflow-y-auto space-y-6 bg-slate-950/20">
+                <!-- Messages populated here -->
+            </div>
+
+            <div class="p-4 bg-slate-900/80 border-t border-slate-800">
+                <div id="lab-tools" class="hidden flex gap-2 mb-4">
+                    <button id="btn-next-round" onclick="runRound2()" class="hidden text-[10px] font-black uppercase bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-500">
+                        Debate Round 2 (Уточнити модель)
+                    </button>
+                    <div class="flex-1"></div>
+                    <span id="lab-status" class="text-[9px] mono text-slate-500 uppercase self-center">Очікування теми...</span>
                 </div>
-                <div class="flex gap-2">
-                    <input type="text" id="user-input" placeholder="Кажи..." class="flex-1 border-2 border-slate-900 p-2 text-sm focus:outline-none">
-                    <button id="send-btn" class="bg-slate-900 text-white px-4 font-black uppercase text-xs">Аналіз</button>
+                
+                <div class="flex gap-3">
+                    <input type="text" id="user-input" placeholder="Введіть проблему або тему дослідження..." 
+                           class="flex-1 bg-slate-950 border border-slate-700 p-4 rounded-xl text-sm focus:outline-none focus:border-red-600 transition-all mono">
+                    <button id="send-btn" class="bg-red-600 hover:bg-red-500 text-white px-8 rounded-xl font-black uppercase tracking-widest transition-all">
+                        RUN
+                    </button>
                 </div>
             </div>
         </div>
@@ -57,28 +107,46 @@
 </div>
 
 <script>
-    // Метрики
-    let m = JSON.parse(localStorage.getItem('t2_m')) || { l: 50, d: 50, w: 50, v: 50, f: 50 };
-
-    // Графік
+    let mode = 'therapy';
+    let currentTopic = "";
+    let stats = JSON.parse(localStorage.getItem('taia_global_stats')) || { l: 50, d: 50, w: 50, v: 50, f: 50 };
     let chart;
+
+    // --- Core Logic ---
+    function setMode(newMode) {
+        mode = newMode;
+        document.getElementById('nav-therapy').className = `btn-mode ${mode === 'therapy' ? 'btn-active' : ''}`;
+        document.getElementById('nav-lab').className = `btn-mode ${mode === 'lab' ? 'btn-active' : ''}`;
+        document.getElementById('side-therapy').classList.toggle('hidden', mode !== 'therapy');
+        document.getElementById('side-lab').classList.toggle('hidden', mode !== 'lab');
+        document.getElementById('lab-tools').classList.toggle('hidden', mode !== 'lab');
+        
+        clearChat();
+        if(mode === 'therapy') {
+            addMsg('taia', "Ти знову в кабінеті. Що на цей раз? Прокрастинація чи черговий напад самообману? Викладай.");
+        } else {
+            addMsg('taia', "Лабораторія в режимі очікування. Введіть тему (наприклад: 'Чи може prediction error стимулювати творчість?').");
+        }
+    }
+
     function initChart() {
-        const c = document.getElementById('metricsChart').getContext('2d');
-        chart = new Chart(c, {
+        const ctx = document.getElementById('metricsChart').getContext('2d');
+        chart = new Chart(ctx, {
             type: 'radar',
             data: {
                 labels: ['ЛІНЬ', 'ПИЗДЬОЖ', 'НИТТЯ', 'ЖЕРТВА', 'СТРАХ'],
                 datasets: [{
-                    data: [m.l, m.d, m.w, m.v, m.f],
+                    data: [stats.l, stats.d, stats.w, stats.v, stats.f],
                     backgroundColor: 'rgba(239, 68, 68, 0.2)',
                     borderColor: '#ef4444',
-                    borderWidth: 2
+                    borderWidth: 2,
+                    pointBackgroundColor: '#ef4444'
                 }]
             },
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
-                scales: { r: { min: 0, max: 100, ticks: { display: false } } },
+                scales: { r: { grid: { color: '#1e293b' }, angleLines: { color: '#1e293b' }, min: 0, max: 100, ticks: { display: false } } },
                 plugins: { legend: { display: false } }
             }
         });
@@ -86,65 +154,104 @@
 
     function upUI() {
         if(chart) {
-            chart.data.datasets[0].data = [m.l, m.d, m.w, m.v, m.f];
+            chart.data.datasets[0].data = [stats.l, stats.d, stats.w, stats.v, stats.f];
             chart.update();
         }
-        document.getElementById('l-laziness').innerText = m.l + '%';
-        document.getElementById('l-delusion').innerText = m.d + '%';
-        localStorage.setItem('t2_m', JSON.stringify(m));
+        document.getElementById('v-l').innerText = stats.l + '%';
+        document.getElementById('v-d').innerText = stats.d + '%';
+        localStorage.setItem('taia_global_stats', JSON.stringify(stats));
     }
 
-    function msg(t, s) {
-        const d = document.createElement('div');
-        const isD = s === 'd';
-        d.className = `flex ${isD ? 'justify-start' : 'justify-end'}`;
-        d.innerHTML = `<div class="max-w-[90%] p-3 ${isD ? 'doctor-msg' : 'user-msg'} shadow-sm text-sm">
-            <b class="text-[8px] uppercase block mb-1">${isD ? 'TAIA 2.0' : 'ТИ'}</b>${t}</div>`;
+    function addMsg(agent, text) {
         const win = document.getElementById('chat-window');
-        win.appendChild(d);
+        const div = document.createElement('div');
+        
+        const configs = {
+            taia: { title: "🧠 TAIA (Director)", style: "taia-style" },
+            neuro: { title: "🔬 NeuroScientist", style: "neuro-style" },
+            philo: { title: "🧩 Chaos Philosopher", style: "philo-style" },
+            skeptic: { title: "😈 Ruthless Skeptic", style: "skeptic-style" },
+            exp: { title: "🧪 Experimentalist", style: "exp-style" },
+            pattern: { title: "📊 Pattern Hunter", style: "pattern-style" },
+            archive: { title: "📚 Archivist", style: "archive-style" },
+            user: { title: "PATIENT", style: "bg-slate-800 text-right self-end ml-auto" }
+        };
+
+        const config = configs[agent];
+        div.className = `p-4 rounded-xl agent-card ${config.style} max-w-[90%]`;
+        div.innerHTML = `
+            <span class="text-[9px] font-black uppercase tracking-widest block mb-2 opacity-70">${config.title}</span>
+            <div class="text-sm leading-relaxed">${text}</div>
+        `;
+        win.appendChild(div);
         win.scrollTop = win.scrollHeight;
     }
 
-    function logic(i) {
-        const v = i.toLowerCase();
-        if (['суїцид', 'вбити себе'].some(x => v.includes(x))) {
-            msg("Дзвони 7333. Зараз. Це не жарт.", 'd');
-            return;
-        }
-        let r = "Я тебе не розумію. Спробуй не пиздіти і сказати щось по суті.";
-        if (v.includes('лінь') || v.includes('потім')) { m.l = Math.min(100, m.l + 10); r = "Лінива дупа зафіксована. Твій прогрес пішов по пізді."; }
-        else if (v.includes('стосунки') || v.includes('любов')) { m.d = Math.min(100, m.d + 15); r = "Стосунки? Ти просто шукаєш виправдання своєму мазохізму."; }
-        else if (v.includes('втомився')) { m.w = Math.min(100, m.w + 10); r = "Втомився він... А я втомилася слухати твоє ниття. Роби справу."; }
-        msg(r, 'd');
-        upUI();
+    function clearChat() { document.getElementById('chat-window').innerHTML = ''; }
+
+    // --- Lab Flow ---
+    async function runLab(topic) {
+        currentTopic = topic;
+        document.getElementById('lab-status').innerText = "Йде активна дискусія...";
+        
+        addMsg('neuro', `<b>Гіпотеза:</b> ${topic} пояснюється через механізми Predictive Coding. Коли мозок отримує сигнал, що не збігається з очікуванням, він оновлює модель.`);
+        await sleep(1500);
+        addMsg('philo', `<b>Радикальний погляд:</b> А що, якщо ${topic} — це не мінімізація, а контрольований <b>prediction error</b>? Мозок навмисно створює шум, щоб вийти за межі шаблону.`);
+        await sleep(1500);
+        addMsg('skeptic', `<b>Критика:</b> Тоді модель має показувати збільшення ентропії. Де ви бачите механізм контролю? Це звучить як нефальсифікована спекуляція.`);
+        await sleep(1500);
+        addMsg('exp', `<b>Експеримент:</b> Можна змонтувати через генеративну мережу (GAN). Ми введемо латентний шум і перевіримо, чи корелює це з "творчими" виходами моделі.`);
+        await sleep(1500);
+        addMsg('pattern', `<b>Pattern Hunter:</b> Схоже на баланс <i>exploration vs exploitation</i>. Ми бачимо цей патерн у поведінці при прийнятті рішень.`);
+        await sleep(1500);
+        addMsg('taia', `<b>Вердикт:</b> Ідея контрольованої помилки перспективна. Але Скептик правий — не вистачає нейронного субстрату. <br><b>Scientific Concern:</b> Як префронтальна кора виділяє ресурси на цей "шум"? <br>Статус: Потребує уточнення.`);
+        await sleep(1000);
+        addMsg('archive', `<b>Записую нову гіпотезу.</b> Тема: ${topic}. Стан: Round 1 complete.`);
+        
+        document.getElementById('btn-next-round').classList.remove('hidden');
+        document.getElementById('lab-status').innerText = "Готовий до раунду 2";
     }
 
+    async function runRound2() {
+        document.getElementById('btn-next-round').classList.add('hidden');
+        document.getElementById('lab-status').innerText = "Round 2: Еволюція ідей...";
+        
+        addMsg('taia', "<b>Debate Round 2:</b> Перегляньте аргументи Скептика. Уточніть модель.");
+        await sleep(1000);
+        addMsg('neuro', "<b>Уточнення:</b> Контроль помилки відбувається через модуляцію дофаміну в базальних гангліях. Це дає 'дозвіл' на ігнорування стандартних патернів.");
+        await sleep(1500);
+        addMsg('skeptic', "<b>Атака:</b> Тепер краще. Але як ми відрізнимо цей 'креативний шум' від психотичного розладу?");
+        await sleep(1000);
+        addMsg('archive', `<b>Еволюція моделі:</b> Додано дофамінергічний механізм. Статус: Active.`);
+        document.getElementById('lab-status').innerText = "Цикл завершено";
+    }
+
+    // --- Interaction ---
     function send() {
-        const i = document.getElementById('user-input');
-        const val = i.value.trim();
+        const input = document.getElementById('user-input');
+        const val = input.value.trim();
         if(!val) return;
-        msg(val, 'u');
-        logic(val);
-        i.value = '';
+
+        addMsg('user', val);
+        input.value = '';
+
+        if(mode === 'therapy') {
+            const v = val.toLowerCase();
+            let res = "Твій пиздьож не змінює фактів. Працюй.";
+            if(v.includes('лінь')) { stats.l = Math.min(100, stats.l + 10); res = "Твоя лінь — це просто страх провалу. Ти жалюгідний."; }
+            else if(v.includes('стосунки')) { stats.d = Math.min(100, stats.d + 15); res = "Знову ідеалізуєш патологію? Твій самообман — твоя в'язниця."; }
+            setTimeout(() => { addMsg('taia', res); upUI(); }, 600);
+        } else {
+            runLab(val);
+        }
     }
 
-    // Глобальна функція для кнопок
-    window.qa = (t) => {
-        const i = document.getElementById('user-input');
-        i.value = t === 'лінь' ? "Я проїбав день." : t === 'стосунки' ? "В мене проблеми в стосунках." : "Я втомився.";
-        send();
-    };
+    function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+    document.getElementById('send-btn').onclick = send;
+    document.getElementById('user-input').onkeypress = (e) => e.key === 'Enter' && send();
 
-    // Запуск
-    document.addEventListener('DOMContentLoaded', () => {
-        initChart();
-        upUI();
-        document.getElementById('send-btn').onclick = send;
-        document.getElementById('user-input').onkeypress = (e) => { if(e.key === 'Enter') send(); };
-        setTimeout(() => msg("Я тут. Кажи, що знову не так у твоєму жалюгідному житті?", 'd'), 500);
-    });
+    window.onload = () => { initChart(); upUI(); setMode('therapy'); };
 </script>
 
 </body>
 </html>
-
