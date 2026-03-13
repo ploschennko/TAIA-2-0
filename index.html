@@ -9,7 +9,9 @@ import {
   Search,
   BookOpen,
   Square,
-  Download
+  Download,
+  RefreshCw,
+  GitBranch
 } from 'lucide-react';
 
 // Ключі LocalStorage для наукових даних
@@ -19,28 +21,25 @@ const LS_KEYS = {
   DRAFT: 'taia_lab_draft_v3'
 };
 
-// Надійний генератор ID (комбінація часу та випадкового рядка)
 const generateId = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
-// Безпечне завантаження даних
 const loadFromLS = (key, fallback) => {
   try {
     const saved = localStorage.getItem(key);
     return saved ? JSON.parse(saved) : fallback;
   } catch (e) {
-    console.warn('loadFromLS failed for', key, e);
     return fallback;
   }
 };
 
 const App = () => {
-  // --- Стан застосунку ---
+  // --- Стан ---
   const [activeTab, setActiveTab] = useState('editor');
   const [logs, setLogs] = useState(() => loadFromLS(LS_KEYS.LOGS, []));
   const [input, setInput] = useState('');
   const [draftContent, setDraftContent] = useState(() => {
     const saved = localStorage.getItem(LS_KEYS.DRAFT);
-    return saved || '# Дослідження: Predictive Brain\nТема: Вплив помилки прогнозу на когнітивну гнучкість.\n\nГіпотеза: ...';
+    return saved || '# Дослідження: Predictive Brain\nТема: Вплив помилки прогнозу на когнітивну гнучкість.';
   });
   const [topics, setTopics] = useState(() => 
     loadFromLS(LS_KEYS.TOPICS, [{ id: generateId(), title: 'Гіпотеза: Креативність через шум', date: new Date().toLocaleDateString() }])
@@ -48,8 +47,9 @@ const App = () => {
   
   const [isProcessing, setIsProcessing] = useState(false);
   const [currentStep, setCurrentStep] = useState(null);
+  const [canEvolution, setCanEvolution] = useState(false);
 
-  // --- Refs для керування DOM та життєвим циклом ---
+  // --- Refs ---
   const chatEndRef = useRef(null);
   const timeoutRef = useRef(null);
   const editorRef = useRef(null);
@@ -58,7 +58,7 @@ const App = () => {
   const abortRef = useRef(false);
   const saveTimerRef = useRef(null);
 
-  // --- Статичні дані агентів (Tailwind Anti-Purge) ---
+  // --- Конфігурація Агентів ---
   const agentMeta = useMemo(() => ({
     neuro: { name: '🔬 NeuroScientist', color: 'text-blue-400', border: 'border-blue-600/50' },
     philo: { name: '🧩 Chaos Philosopher', color: 'text-purple-400', border: 'border-purple-600/50' },
@@ -71,7 +71,7 @@ const App = () => {
 
   const agentsList = useMemo(() => Object.keys(agentMeta).map(id => ({ id, ...agentMeta[id] })), [agentMeta]);
 
-  // --- Життєвий цикл та Cleanup ---
+  // --- Життєвий цикл ---
   useEffect(() => {
     mountedRef.current = true;
     return () => {
@@ -81,245 +81,194 @@ const App = () => {
     };
   }, []);
 
-  // Debounced збереження логів (оптимізація продуктивності)
+  // Оптимізоване збереження (Debounce)
   useEffect(() => {
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(() => {
-      try {
-        localStorage.setItem(LS_KEYS.LOGS, JSON.stringify(logs));
-      } catch (e) {
-        console.warn('Failed to save logs to localStorage', e);
-      }
-      saveTimerRef.current = null;
-    }, 300);
-    return () => {
-      if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null; }
-    };
+      localStorage.setItem(LS_KEYS.LOGS, JSON.stringify(logs));
+    }, 400);
   }, [logs]);
 
-  // Синхронізація інших даних
-  useEffect(() => {
-    try { localStorage.setItem(LS_KEYS.DRAFT, draftContent); }
-    catch (e) { console.warn('Failed to save draft', e); }
-  }, [draftContent]);
+  useEffect(() => { localStorage.setItem(LS_KEYS.DRAFT, draftContent); }, [draftContent]);
+  useEffect(() => { localStorage.setItem(LS_KEYS.TOPICS, JSON.stringify(topics)); }, [topics]);
 
-  useEffect(() => {
-    try { localStorage.setItem(LS_KEYS.TOPICS, JSON.stringify(topics)); }
-    catch (e) { console.warn('Failed to save topics', e); }
-  }, [topics]);
-
-  // Автоматичне підлаштування висоти текстових полів
   const autoResize = useCallback((el) => {
     if (!el) return;
     el.style.height = 'auto';
-    el.style.height = `${Math.min(el.scrollHeight, 450)}px`;
+    el.style.height = `${Math.min(el.scrollHeight, 500)}px`;
   }, []);
 
   useEffect(() => autoResize(editorRef.current), [draftContent, activeTab, autoResize]);
   useEffect(() => autoResize(inputRef.current), [input, autoResize]);
 
-  // Скрол до останнього повідомлення
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [logs, isProcessing]);
 
-  // --- Логіка дебатів Lab Core ---
+  // --- Наукова Логіка ---
   const handleStop = useCallback(() => {
     abortRef.current = true;
-    if (timeoutRef.current) {
-      clearTimeout(timeoutRef.current);
-      timeoutRef.current = null;
-    }
+    if (timeoutRef.current) clearTimeout(timeoutRef.current);
     setIsProcessing(false);
     setCurrentStep(null);
     inputRef.current?.focus();
   }, []);
 
-  const runLabDebate = useCallback(async (topic) => {
+  const runDebateCycle = async (topic, isEvolution = false) => {
     setIsProcessing(true);
     abortRef.current = false;
-    
-    const responses = {
-      neuro: `Гіпотеза: ${topic} регулюється через ієрархічне кодування помилок прогнозу (PE).`,
-      philo: `Радикальність: ${topic} — це навмисний когнітивний хаос для реструктуризації нейронної мережі.`,
-      skeptic: `Критика: Ваша модель не має механістичного доказу. Де ідентифікація нейронного субстрату?`,
-      exp: `Експеримент: Перевіримо гіпотезу через fMRI парадигму Oddball. Потрібна оцінка латентності ACC.`,
-      pattern: `Патерн: Схоже на стохастичний резонанс у нелінійних біологічних системах.`,
-      taia: `Вердикт: Гіпотеза перспективна. Очистити від спекуляцій і зосередитись на дофаміновій модуляції.`,
-      archive: `Дослідження зафіксовано. Тема: ${topic}. Статус: Формування моделі.`
+    setCanEvolution(false);
+
+    const dataSet = isEvolution ? {
+        neuro: `Еволюція моделі: Інтегруємо дофамінергічний фідбек. ${topic} тепер розглядається як динамічний баланс.`,
+        philo: `Синтез: Хаос не є помилкою, це необхідний етап реконсолідації пам'яті.`,
+        skeptic: `Фінальна атака: Якщо це так, де межа між гнучкістю та патологією? Модель все ще потребує валідації.`,
+        taia: `Фінальний вердикт: Модель ${topic} прийнята до розробки з урахуванням обмежень Скептика.`,
+        archive: `Еволюцію ідей завершено. Модель оновлена до v2.0.`
+    } : {
+        neuro: `Гіпотеза: ${topic} базується на ієрархічному предиктивному кодуванні в неокортексі.`,
+        philo: `Провокація: А що, як ${topic} — це спосіб мозку «зламати» власні очікування для росту?`,
+        skeptic: `Критика: Ваша теорія занадто абстрактна. Надайте конкретні нейронні ланцюги.`,
+        exp: `Дизайн дослідження: Пропонуємо тест із використанням транскраніальної магнітної стимуляції.`,
+        pattern: `Аналіз: Схожі патерни спостерігаються при навчанні з підкріпленням.`,
+        taia: `Резолюція: Гіпотеза цікава. Скептицизм обґрунтований. Потрібен другий раунд уточнень.`,
+        archive: `Раунд 1 зафіксовано. Очікується запуск еволюції.`
     };
 
     try {
-      for (const agent of agentsList) {
+      for (const agentId of Object.keys(dataSet)) {
         if (!mountedRef.current || abortRef.current) break;
-        
+        const agent = agentMeta[agentId] || agentMeta.archive;
         setCurrentStep(agent.name);
         
-        if (timeoutRef.current) clearTimeout(timeoutRef.current);
-        await new Promise(resolve => {
-          timeoutRef.current = setTimeout(resolve, 1200);
-        });
-
+        await new Promise(resolve => { timeoutRef.current = setTimeout(resolve, 1000); });
         if (!mountedRef.current || abortRef.current) break;
 
-        setLogs(prev => {
-          const next = [...prev, {
-            id: generateId(),
-            agent: agent.id,
-            content: responses[agent.id] || "Дані не отримані."
-          }];
-          return next.slice(-1000); // Ліміт записів в історії
-        });
+        setLogs(prev => [...prev, {
+          id: generateId(),
+          agent: agentId,
+          content: dataSet[agentId]
+        }].slice(-1000));
       }
-    } catch (err) {
-      console.error("Lab Failure:", err);
     } finally {
       if (mountedRef.current) {
         setIsProcessing(false);
         setCurrentStep(null);
-        if (timeoutRef.current) { clearTimeout(timeoutRef.current); timeoutRef.current = null; }
+        if (!isEvolution && !abortRef.current) setCanEvolution(true);
         inputRef.current?.focus();
       }
     }
-  }, [agentsList]);
+  };
 
-  const handleRun = useCallback(() => {
+  const handleRun = () => {
     const val = input.trim();
     if (!val || isProcessing) return;
     setLogs(prev => [...prev, { id: generateId(), agent: 'user', content: val }]);
+    const topicToRun = val;
     setInput('');
-    runLabDebate(val);
-  }, [input, isProcessing, runLabDebate]);
+    runDebateCycle(topicToRun);
+  };
 
-  // Функція експорту всього проекту в JSON
   const handleExport = useCallback(() => {
     const exportData = {
       app: "TAIA Lab Core",
-      version: "3.5 Final",
+      version: "3.5",
       timestamp: new Date().toISOString(),
-      data: {
-        draft: draftContent,
-        topics: topics,
-        logs: logs
-      }
+      content: { draft: draftContent, topics, logs }
     };
-
     const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `TAIA_Lab_Export_${new Date().toISOString().split('T')[0]}.json`;
-    document.body.appendChild(link);
+    link.download = `TAIA_Export_${new Date().toISOString().split('T')[0]}.json`;
     link.click();
-    document.body.removeChild(link);
     URL.revokeObjectURL(url);
   }, [draftContent, topics, logs]);
 
-  const clearLogs = useCallback(() => { if (window.confirm("Очистити архів дискусії?")) setLogs([]); }, []);
-
   return (
-    <div className="flex h-screen bg-[#020617] text-slate-200 font-sans selection:bg-blue-500/30 overflow-hidden">
-      {/* Sidebar: Lab Knowledge Base */}
+    <div className="flex h-screen bg-[#020617] text-slate-200 font-sans selection:bg-blue-600/30 overflow-hidden">
+      {/* Sidebar */}
       <aside className="w-64 border-r border-slate-800 bg-slate-900/50 flex flex-col shrink-0">
-        <div className="p-5 border-b border-slate-800 flex items-center gap-2">
-          <div className="bg-blue-600 p-1.5 rounded shadow-lg shadow-blue-600/30">
-            <Layers size={18} className="text-white" />
+        <div className="p-6 border-b border-slate-800 flex items-center gap-3">
+          <div className="bg-blue-600 p-2 rounded-lg shadow-lg shadow-blue-600/20">
+            <Layers size={20} className="text-white" />
           </div>
-          <h1 className="text-lg font-black tracking-tighter uppercase">
-            TAIA <span className="text-blue-500 font-bold">Lab Core</span>
+          <h1 className="text-xl font-black tracking-tighter uppercase leading-none">
+            TAIA <span className="text-blue-500">Lab</span>
           </h1>
         </div>
         
-        <div className="flex-1 overflow-y-auto p-4 custom-scrollbar space-y-6">
+        <div className="flex-1 overflow-y-auto p-4 custom-scrollbar space-y-8">
           <button 
             onClick={() => setTopics(prev => [{id: generateId(), title: 'Нова гіпотеза', date: new Date().toLocaleDateString()}, ...prev])}
-            className="w-full flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white py-2 rounded-lg transition-all text-xs font-bold uppercase tracking-widest shadow-sm active:scale-95"
-            aria-label="Створити нову наукову тему"
+            className="w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-500 text-white py-2.5 rounded-xl transition-all text-[10px] font-black uppercase tracking-widest shadow-lg shadow-blue-900/40 active:scale-95"
           >
-            <Plus size={14} /> Додати тему
+            <Plus size={14} /> Створити тему
           </button>
           
-          <nav className="space-y-2">
-            <p className="text-[10px] font-black text-slate-500 uppercase px-1 tracking-widest flex items-center gap-2">
-              <BookOpen size={10} /> База Знань
-            </p>
-            {topics.length === 0 ? (
-              <p className="text-[10px] text-slate-700 px-1 italic">Список тем порожній</p>
-            ) : (
-              topics.map(t => (
-                <div key={t.id} className="group flex items-center justify-between p-2.5 hover:bg-slate-800/50 rounded-lg cursor-pointer transition-all border border-transparent hover:border-slate-800">
-                  <div className="truncate pr-2">
-                    <p className="text-xs font-semibold truncate text-slate-300">{t.title}</p>
-                    <p className="text-[9px] text-slate-600">{t.date}</p>
-                  </div>
-                  <button 
-                    onClick={(e) => { 
-                      e.stopPropagation(); 
-                      if (window.confirm('Видалити тему? Дії відкотити не можна.')) {
-                        setTopics(prev => prev.filter(x => x.id !== t.id)); 
-                      }
-                    }} 
-                    className="opacity-0 group-hover:opacity-100 text-slate-600 hover:text-red-500 transition-colors p-1"
-                    aria-label="Видалити тему дослідження"
-                  >
-                    <Trash2 size={12} />
-                  </button>
+          <nav className="space-y-4">
+            <div className="flex items-center gap-2 px-2">
+                <BookOpen size={12} className="text-slate-500" />
+                <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">База Знань</p>
+            </div>
+            {topics.map(t => (
+              <div key={t.id} className="group flex items-center justify-between p-3 hover:bg-slate-800 rounded-xl cursor-pointer transition-all border border-transparent hover:border-slate-700 relative overflow-hidden">
+                <div className="truncate pr-4 z-10">
+                  <p className="text-xs font-bold truncate text-slate-300 group-hover:text-blue-400 transition-colors">{t.title}</p>
+                  <p className="text-[9px] text-slate-600 mt-1">{t.date}</p>
                 </div>
-              ))
-            )}
+                <button 
+                  onClick={(e) => { e.stopPropagation(); if(window.confirm('Видалити?')) setTopics(prev => prev.filter(x => x.id !== t.id)); }} 
+                  className="opacity-0 group-hover:opacity-100 text-slate-500 hover:text-red-500 transition-all p-1 z-10"
+                >
+                  <Trash2 size={12} />
+                </button>
+              </div>
+            ))}
           </nav>
         </div>
 
-        <div className="p-4 border-t border-slate-800">
-            <div className="p-3 bg-slate-950/50 border border-slate-800 rounded-xl">
-                <p className="text-[9px] font-black uppercase text-slate-500 mb-1">Status Ядра</p>
+        <div className="p-4 border-t border-slate-800 bg-slate-950/20">
+            <div className="p-3 bg-slate-900/50 border border-slate-800 rounded-2xl">
+                <p className="text-[9px] font-black uppercase text-slate-600 mb-2">Статус системи</p>
                 <div className="flex items-center gap-2">
-                    <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                    <span className="text-[10px] font-bold text-emerald-500 uppercase tracking-tighter">Синхронізовано</span>
+                    <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_8px_#10b981]" />
+                    <span className="text-[10px] font-black text-emerald-500 uppercase tracking-tighter">Синхронізовано</span>
                 </div>
             </div>
         </div>
       </aside>
 
       {/* Main Workspace */}
-      <main className="flex-1 flex flex-col bg-[#020617] relative">
-        <nav className="h-14 border-b border-slate-800 flex items-center px-6 justify-between bg-slate-900/20 backdrop-blur-xl z-10">
-          <div className="flex gap-8 h-full" role="tablist">
+      <main className="flex-1 flex flex-col relative bg-[#020617]">
+        <nav className="h-16 border-b border-slate-800 flex items-center px-8 justify-between bg-slate-900/20 backdrop-blur-2xl z-20">
+          <div className="flex gap-10 h-full">
             <button 
               onClick={() => setActiveTab('editor')}
-              role="tab"
-              aria-selected={activeTab === 'editor'}
-              className={`text-[10px] font-black uppercase tracking-[0.2em] relative flex items-center transition-all ${activeTab === 'editor' ? 'text-blue-400' : 'text-slate-500 hover:text-slate-300'}`}
+              className={`text-[11px] font-black uppercase tracking-[0.2em] relative flex items-center transition-all ${activeTab === 'editor' ? 'text-blue-400' : 'text-slate-500 hover:text-slate-300'}`}
             >
-              Draft / Гіпотеза
+              Drafting Area
               {activeTab === 'editor' && <div className="absolute bottom-0 left-0 w-full h-0.5 bg-blue-500 shadow-[0_0_15px_#3b82f6]" />}
             </button>
             <button 
               onClick={() => setActiveTab('preview')}
-              role="tab"
-              aria-selected={activeTab === 'preview'}
-              className={`text-[10px] font-black uppercase tracking-[0.2em] relative flex items-center transition-all ${activeTab === 'preview' ? 'text-blue-400' : 'text-slate-500 hover:text-slate-300'}`}
+              className={`text-[11px] font-black uppercase tracking-[0.2em] relative flex items-center transition-all ${activeTab === 'preview' ? 'text-blue-400' : 'text-slate-500 hover:text-slate-300'}`}
             >
-              Archive View
+              Archived Models
               {activeTab === 'preview' && <div className="absolute bottom-0 left-0 w-full h-0.5 bg-blue-500 shadow-[0_0_15px_#3b82f6]" />}
             </button>
           </div>
-          <div className="flex gap-3">
-            <button 
-              onClick={handleExport}
-              title="Експорт результатів (JSON)" 
-              className="p-2 hover:bg-slate-800 rounded-lg text-slate-500 hover:text-blue-400 transition-all active:scale-90"
-              aria-label="Завантажити результати дослідження в JSON"
-            >
-              <Download size={16} />
+          <div className="flex gap-4">
+            <button onClick={handleExport} title="Експорт результатів" className="p-2.5 hover:bg-slate-800 rounded-xl text-slate-500 hover:text-blue-400 transition-all active:scale-90 border border-transparent hover:border-slate-700">
+              <Download size={18} />
             </button>
-            <button title="Налаштування" className="p-2 hover:bg-slate-800 rounded-lg text-slate-500 transition-all" aria-label="Системні налаштування"><Settings size={16} /></button>
+            <button className="p-2.5 hover:bg-slate-800 rounded-xl text-slate-500 transition-all border border-transparent hover:border-slate-700"><Settings size={18} /></button>
           </div>
         </nav>
 
         <div className="flex-1 flex overflow-hidden">
-          {/* Editor Area */}
-          <section className="flex-1 p-8 overflow-y-auto">
+          {/* Editor */}
+          <section className="flex-1 p-10 overflow-y-auto bg-gradient-to-br from-slate-950 to-transparent">
             <div className="max-w-3xl mx-auto h-full">
               {activeTab === 'editor' ? (
                 <textarea 
@@ -328,72 +277,60 @@ const App = () => {
                   onChange={(e) => setDraftContent(e.target.value)}
                   className="w-full h-full bg-transparent outline-none resize-none font-mono text-sm leading-relaxed text-slate-400 placeholder:text-slate-800 focus:text-slate-200 transition-colors"
                   spellCheck={false}
-                  aria-label="Редактор наукового чернетки"
+                  placeholder="Введіть основну чернетку гіпотези тут..."
                 />
               ) : (
-                <div className="p-8 bg-slate-900/20 border border-slate-800 rounded-2xl min-h-[500px] shadow-inner">
-                  <pre className="text-xs font-mono whitespace-pre-wrap leading-relaxed text-slate-500 italic">
-                    {draftContent || "Порожня чернетка..."}
+                <div className="p-10 bg-slate-900/10 border border-slate-800 rounded-3xl min-h-[500px] shadow-2xl backdrop-blur-sm">
+                  <pre className="text-xs font-mono whitespace-pre-wrap leading-relaxed text-slate-500 italic opacity-80">
+                    {draftContent || "Документація відсутня."}
                   </pre>
                 </div>
               )}
             </div>
           </section>
 
-          {/* Terminal Panel */}
-          <section className="w-[450px] border-l border-slate-800 bg-slate-900/10 flex flex-col" aria-label="Панель дебатів агентів">
-            <div className="p-4 border-b border-slate-800 flex items-center justify-between bg-slate-900/30">
-              <div className="flex items-center gap-2 text-blue-500">
-                <Terminal size={14} strokeWidth={3} />
-                <span className="text-[10px] font-black uppercase tracking-widest">Lab Research Logs</span>
+          {/* Debate Terminal */}
+          <section className="w-[500px] border-l border-slate-800 bg-slate-950/30 flex flex-col relative shadow-2xl">
+            <div className="p-5 border-b border-slate-800 flex items-center justify-between bg-slate-900/40">
+              <div className="flex items-center gap-3 text-blue-500">
+                <Terminal size={16} strokeWidth={3} />
+                <span className="text-[11px] font-black uppercase tracking-[0.2em]">Lab Logs / Deep Debate</span>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-3">
                 {isProcessing && (
-                  <button 
-                    onClick={handleStop} 
-                    title="Зупинити процес" 
-                    className="p-1.5 text-slate-400 hover:text-yellow-500 transition-colors" 
-                    aria-label="Зупинити цикл аналізу"
-                  >
+                  <button onClick={handleStop} title="Зупинити" className="p-1.5 text-slate-400 hover:text-yellow-500 transition-colors animate-pulse">
                     <Square size={14} fill="currentColor" />
                   </button>
                 )}
-                <button 
-                  onClick={clearLogs} 
-                  className="p-1.5 text-slate-600 hover:text-red-500 transition-colors" 
-                  aria-label="Очистити логи дебатів"
-                >
-                  <Trash2 size={14} />
+                <button onClick={() => {if(window.confirm('Очистити?')) setLogs([]);}} className="p-1.5 text-slate-600 hover:text-red-500 transition-colors">
+                  <Trash2 size={16} />
                 </button>
               </div>
             </div>
             
-            <div 
-              className="flex-1 overflow-y-auto p-4 space-y-6 custom-scrollbar" 
-              role="log" 
-              aria-live="polite"
-              aria-atomic="false"
-            >
+            <div className="flex-1 overflow-y-auto p-6 space-y-8 custom-scrollbar" role="log" aria-live="polite">
               {logs.length === 0 && (
-                <div className="flex flex-col items-center justify-center h-full opacity-30 text-center p-8">
-                  <Search size={40} className="mb-4 text-slate-700" />
-                  <p className="text-[10px] uppercase font-bold tracking-widest text-slate-600 italic">Очікування вводу проблеми...</p>
+                <div className="flex flex-col items-center justify-center h-full opacity-10 text-center p-12">
+                  <Search size={64} className="mb-6 text-slate-600" />
+                  <p className="text-xs font-black uppercase tracking-[0.3em] text-slate-500 italic leading-loose">
+                    Ядро очікує вводу наукової проблеми для ініціалізації агентів
+                  </p>
                 </div>
               )}
               
               {logs.map((log) => {
                 const meta = agentMeta[log.agent];
                 return (
-                  <div key={log.id} className={`flex flex-col ${log.agent === 'user' ? 'items-end' : 'items-start'}`}>
+                  <div key={log.id} className={`flex flex-col animate-in fade-in slide-in-from-left-4 duration-300 ${log.agent === 'user' ? 'items-end' : 'items-start'}`}>
                     {meta ? (
-                      <div className={`w-full p-4 rounded-xl border-l-4 bg-slate-900/40 shadow-sm ${meta.border}`}>
-                        <span className={`text-[9px] font-black uppercase mb-2 block tracking-widest ${meta.color}`}>
+                      <div className={`w-full p-5 rounded-2xl border-l-4 bg-slate-900/40 shadow-sm transition-all hover:bg-slate-900/60 ${meta.border}`}>
+                        <span className={`text-[10px] font-black uppercase mb-3 block tracking-widest ${meta.color}`}>
                           {meta.name}
                         </span>
-                        <p className="text-xs leading-relaxed text-slate-300">{log.content}</p>
+                        <p className="text-xs leading-relaxed text-slate-300 font-medium">{log.content}</p>
                       </div>
                     ) : (
-                      <div className="bg-slate-800 border border-slate-700 px-4 py-2.5 rounded-2xl rounded-tr-none text-xs text-blue-100 max-w-[85%] shadow-md">
+                      <div className="bg-slate-800 border border-slate-700 px-5 py-3 rounded-2xl rounded-tr-none text-[13px] text-blue-100 max-w-[90%] shadow-lg shadow-black/20">
                         {log.content}
                       </div>
                     )}
@@ -402,39 +339,48 @@ const App = () => {
               })}
               
               {isProcessing && (
-                <div className="flex flex-col gap-2" aria-label="Триває процес аналізу">
-                    <div className="flex gap-2 p-3 bg-slate-900/60 rounded-xl border border-slate-800">
-                        <div className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-bounce" />
-                        <div className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-bounce [animation-delay:-0.2s]" />
-                        <div className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-bounce [animation-delay:-0.4s]" />
+                <div className="flex flex-col gap-4">
+                    <div className="flex gap-3 p-4 bg-slate-900/60 rounded-2xl border border-slate-800 w-fit">
+                        <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" />
+                        <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce [animation-delay:-0.2s]" />
+                        <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce [animation-delay:-0.4s]" />
                     </div>
-                    <span className="text-[9px] mono text-blue-500/50 px-1 uppercase font-bold tracking-widest">
-                        {currentStep} думає...
+                    <span className="text-[10px] mono text-blue-500/60 px-2 uppercase font-black tracking-widest animate-pulse">
+                        {currentStep} генерує модель...
                     </span>
                 </div>
               )}
               <div ref={chatEndRef} />
             </div>
 
-            <div className="p-5 bg-slate-900/40 border-t border-slate-800">
+            {/* Terminal Tools & Evolution Button */}
+            <div className="p-6 bg-slate-950/80 border-t border-slate-800 backdrop-blur-md">
+              {canEvolution && !isProcessing && (
+                <button 
+                  onClick={() => runDebateCycle("Еволюція ідей", true)}
+                  className="w-full mb-6 flex items-center justify-center gap-3 bg-gradient-to-r from-emerald-600 to-teal-700 text-white py-3 rounded-2xl transition-all text-xs font-black uppercase tracking-widest shadow-xl shadow-emerald-900/40 hover:scale-[1.02] active:scale-95 border border-emerald-500/30"
+                >
+                  <RefreshCw size={16} className="animate-spin-slow" /> Debate Round 2: Evolution
+                </button>
+              )}
+
               <div className="relative group">
                 <textarea 
                   ref={inputRef}
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && (e.preventDefault(), handleRun())}
-                  placeholder="Введіть наукову проблему для дебатів..."
+                  placeholder="Введіть проблему (напр: Механізм Neuroplasticity)..."
                   rows={1}
-                  className="w-full bg-slate-950 border border-slate-800 focus:border-blue-600/50 rounded-2xl py-3.5 pl-5 pr-14 text-xs focus:outline-none transition-all resize-none custom-scrollbar overflow-hidden placeholder:text-slate-700"
-                  aria-label="Поле вводу наукової проблеми для обговорення"
+                  className="w-full bg-slate-900 border border-slate-800 focus:border-blue-600/50 rounded-2xl py-4 pl-6 pr-14 text-xs focus:outline-none transition-all resize-none custom-scrollbar overflow-hidden placeholder:text-slate-700 shadow-inner"
+                  aria-label="Ввід теми дослідження"
                 />
                 <button 
                   onClick={handleRun}
                   disabled={!input.trim() || isProcessing}
-                  className="absolute right-2.5 bottom-2.5 p-2 bg-blue-600 text-white rounded-xl hover:bg-blue-500 transition-all disabled:opacity-20 shadow-lg shadow-blue-600/20 active:scale-95"
-                  aria-label="Запустити процес дебатів"
+                  className="absolute right-3 bottom-3 p-2 bg-blue-600 text-white rounded-xl hover:bg-blue-500 transition-all disabled:opacity-10 shadow-lg shadow-blue-600/30 active:scale-90"
                 >
-                  <Send size={16} />
+                  <Send size={18} />
                 </button>
               </div>
             </div>
@@ -443,7 +389,9 @@ const App = () => {
       </main>
 
       <style dangerouslySetInnerHTML={{ __html: `
-        .custom-scrollbar::-webkit-scrollbar { width: 3px; }
+        @keyframes spin-slow { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        .animate-spin-slow { animation: spin-slow 4s linear infinite; }
+        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
         .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
         .custom-scrollbar::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 10px; }
         .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #3b82f6; }
